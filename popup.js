@@ -632,6 +632,9 @@ function loadNoteToForm(id) {
   pendingAttachments = [];
   renderAttachPreview(note.attachments || []);
   queueDraftSave();
+  
+  // Scroll to form so user can see the loaded note title and content
+  document.getElementById("noteForm").scrollIntoView({ behavior: "smooth" });
 }
 
 function setPinSectionMode(hasPin) {
