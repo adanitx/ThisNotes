@@ -8,6 +8,7 @@ const STORAGE_SYNC_NOTES = "thisnotes.sync.notes";
 const STORAGE_SYNC_UPDATED_AT = "thisnotes.sync.updatedAt";
 const STORAGE_DRAFTS = "thisnotes.draftsByTab";
 const STORAGE_TRASH = "thisnotes.trash";
+const STORAGE_SESSION_HIDDEN = "thisnotes.sessionHidden";
 
 const defaultStyle = {
   noteColor: "#fff2a8",
@@ -28,6 +29,7 @@ let unlocked = false;
 let skipDeleteConfirm = false;
 let deleteModalResolve = null;
 let pendingAttachments = [];
+let sessionHiddenNotes = []; // Track session-hidden notes from storage
 
 const fontCatalog = [
   "Arial",
@@ -73,6 +75,32 @@ const icons = {
 
 init().catch((err) => console.error(err));
 
+// Listen for storage changes from content.js (session hidden notes updates)
+ext.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") {
+    return;
+  }
+  if (changes[STORAGE_SESSION_HIDDEN]) {
+    refresh().catch((err) => console.error(err));
+  }
+});
+
+async function getSessionHiddenFromContentScript() {
+  try {
+    const [tab] = await ext.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) {
+      return [];
+    }
+    const response = await ext.tabs.sendMessage(tab.id, {
+      type: "THISNOTES_GET_SESSION_HIDDEN",
+    });
+    return response?.sessionHiddenNotes || [];
+  } catch {
+    // Content script not available
+    return [];
+  }
+}
+
 async function init() {
   wireEvents();
   initFontSelector();
@@ -97,6 +125,9 @@ function wireEvents() {
     document.getElementById("importFile").click();
   });
   document.getElementById("importFile").addEventListener("change", importNotes);
+  document.getElementById("noteSearchInput").addEventListener("input", (e) => {
+    renderList(e.target.value);
+  });
   document.getElementById("unlockBtn").addEventListener("click", unlockWithPin);
   document.getElementById("reloadTabBtn").addEventListener("click", reloadCurrentTab);
   document.getElementById("attachInput").addEventListener("change", onAttachFiles);
@@ -170,14 +201,19 @@ function ensureFontInSelector(fontName) {
 }
 
 async function refresh() {
-  const store = await ext.storage.local.get([STORAGE_NOTES, STORAGE_SECURITY]);
+  const store = await ext.storage.local.get([STORAGE_NOTES, STORAGE_SECURITY, STORAGE_SESSION_HIDDEN]);
   notes = store[STORAGE_NOTES] || [];
   lockConfig = {
     enabled: !!store[STORAGE_SECURITY]?.enabled,
     pinHash: String(store[STORAGE_SECURITY]?.pinHash || ""),
   };
+  
+  // Get real-time session hidden notes from content script
+  sessionHiddenNotes = await getSessionHiddenFromContentScript();
+  
   refreshLockUi();
   renderList();
+  document.getElementById("noteSearchInput").value = ""; // Clear search field
   setDefaultWeb();
   await restoreDraft();
 }
@@ -365,6 +401,12 @@ function getSiteNotes() {
 }
 
 function isVisibleOnSite(note) {
+  // First check if note is hidden in current session
+  if (sessionHiddenNotes.includes(note.id)) {
+    return false;
+  }
+  
+  // Then check permanent visibility settings
   const map = note.siteVisibility || {};
   const normalizedActive = normalizeComparableUrl(activeSite);
   if (Object.prototype.hasOwnProperty.call(map, normalizedActive)) {
@@ -379,7 +421,7 @@ function isVisibleOnSite(note) {
   return true;
 }
 
-function renderList() {
+function renderList(searchTerm = "") {
   const list = document.getElementById("notesList");
   list.innerHTML = "";
 
@@ -388,7 +430,18 @@ function renderList() {
     return;
   }
 
-  const siteNotes = getSiteNotes();
+  let siteNotes = getSiteNotes();
+  
+  // Aplicar filtro de búsqueda si existe
+  if (searchTerm.trim()) {
+    const searchLower = searchTerm.toLowerCase();
+    siteNotes = siteNotes.filter((note) => {
+      const titleMatch = (note.title || "").toLowerCase().includes(searchLower);
+      const contentMatch = (note.content || "").toLowerCase().includes(searchLower);
+      return titleMatch || contentMatch;
+    });
+  }
+  
   if (!siteNotes.length) {
     list.innerHTML = '<p class="empty">No hay notas para esta web.</p>';
     return;
@@ -397,6 +450,9 @@ function renderList() {
   const tpl = document.getElementById("noteItemTemplate");
   for (const note of siteNotes) {
     const frag = tpl.content.cloneNode(true);
+    const article = frag.querySelector(".noteItem");
+    article.dataset.noteId = note.id;
+    
     frag.querySelector(".noteTitle").textContent = note.title || "Sin titulo";
     frag.querySelector(".noteMeta").textContent = `Actualizada: ${new Date(note.updatedAt).toLocaleString()}`;
     frag.querySelector(".noteSnippet").textContent = (note.content || "").slice(0, 140);
@@ -615,6 +671,14 @@ async function toggleNoteVisibility(id) {
   if (!requireUnlocked()) {
     return;
   }
+  
+  // Find the note element button to update immediately
+  const list = document.getElementById("notesList");
+  const noteElement = Array.from(list.querySelectorAll('[data-note-id]')).find(
+    (el) => el.dataset.noteId === id
+  );
+  const eyeButton = noteElement?.querySelector('.toggleVisibility');
+  
   let toggledToVisible = false;
   notes = notes.map((note) => {
     if (note.id !== id) {
@@ -631,7 +695,27 @@ async function toggleNoteVisibility(id) {
     return { ...note, siteVisibility: map, updatedAt: new Date().toISOString() };
   });
 
+  // Update the eye button immediately for visual feedback
+  if (eyeButton) {
+    eyeButton.innerHTML = toggledToVisible ? icons.eyeOpen : icons.eyeClosed;
+  }
+
   await saveNotes();
+  
+  // Also toggle session visibility in content.js
+  const [tab] = await ext.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id) {
+    try {
+      await ext.tabs.sendMessage(tab.id, {
+        type: "THISNOTES_TOGGLE_SESSION_VISIBILITY",
+        noteId: id,
+        show: toggledToVisible,
+      });
+    } catch {
+      // Content script not injected, will be handled by page reload
+    }
+  }
+  
   if (toggledToVisible) {
     await notifyActiveTab(true);
   }

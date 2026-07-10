@@ -4,6 +4,7 @@ const STORAGE_NOTES = "thisnotes.notes";
 const STORAGE_PREFS = "thisnotes.displayPrefs";
 const STORAGE_LAYOUT = "thisnotes.layout";
 const STORAGE_TRASH = "thisnotes.trash";
+const STORAGE_SESSION_HIDDEN = "thisnotes.sessionHidden";
 
 const defaultPrefs = {
   applyNoteColor: true,
@@ -38,6 +39,19 @@ const sessionHiddenNotes = new Set();
 ext.runtime.onMessage.addListener((message) => {
   if (message?.type === "THISNOTES_REFRESH" || message?.type === "THISNOTES_OPEN_PANEL") {
     render().catch((err) => console.error(err));
+  } else if (message?.type === "THISNOTES_TOGGLE_SESSION_VISIBILITY") {
+    const { noteId, show } = message;
+    if (show) {
+      showNoteOnSite(noteId).catch((err) => console.error(err));
+    } else {
+      hideNoteOnSite(noteId).catch((err) => console.error(err));
+    }
+  } else if (message?.type === "THISNOTES_GET_SESSION_HIDDEN") {
+    // Return current session hidden notes
+    return Promise.resolve({
+      sessionHiddenNotes: Array.from(sessionHiddenNotes),
+      currentUrl,
+    });
   }
 });
 
@@ -45,12 +59,16 @@ ext.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") {
     return;
   }
-  if (changes[STORAGE_NOTES] || changes[STORAGE_PREFS] || changes[STORAGE_LAYOUT]) {
+  if (changes[STORAGE_NOTES] || changes[STORAGE_PREFS] || changes[STORAGE_LAYOUT] || changes[STORAGE_SESSION_HIDDEN]) {
     render().catch((err) => console.error(err));
   }
 });
 
-render().catch((err) => console.error(err));
+// Initialize: Load session hidden notes and render
+(async () => {
+  await loadSessionHiddenNotes();
+  await render().catch((err) => console.error(err));
+})();
 
 // Detectar cambios de URL para SPAs (Single Page Applications)
 function updateCurrentUrlIfChanged() {
@@ -62,8 +80,29 @@ function updateCurrentUrlIfChanged() {
     siteKey = newHost;
     lastCheckedUrl = currentUrl;
     sessionHiddenNotes.clear(); // Limpiar ocultos al cambiar de URL
+    saveSessionHiddenNotes(); // Persist cleared state
     render().catch((err) => console.error(err));
   }
+}
+
+// Load and save session hidden notes from/to storage
+async function loadSessionHiddenNotes() {
+  const store = await ext.storage.local.get([STORAGE_SESSION_HIDDEN]);
+  const hidden = store[STORAGE_SESSION_HIDDEN] || {};
+  const urlHidden = hidden[currentUrl] || [];
+  sessionHiddenNotes.clear();
+  urlHidden.forEach((id) => sessionHiddenNotes.add(id));
+}
+
+async function saveSessionHiddenNotes() {
+  const store = await ext.storage.local.get([STORAGE_SESSION_HIDDEN]);
+  const hidden = store[STORAGE_SESSION_HIDDEN] || {};
+  if (sessionHiddenNotes.size > 0) {
+    hidden[currentUrl] = Array.from(sessionHiddenNotes);
+  } else {
+    delete hidden[currentUrl];
+  }
+  await ext.storage.local.set({ [STORAGE_SESSION_HIDDEN]: hidden });
 }
 
 // Listener para cambios de hash
@@ -384,23 +423,15 @@ function mountRoot() {
 }
 
 async function hideNoteOnSite(noteId) {
-  const store = await ext.storage.local.get([STORAGE_NOTES]);
-  const notes = store[STORAGE_NOTES] || [];
-  const updated = notes.map((note) => {
-    if (note.id !== noteId) {
-      return note;
-    }
-    return {
-      ...note,
-      siteVisibility: {
-        ...(note.siteVisibility || {}),
-        [currentUrl]: false,
-        [siteKey]: false,
-      },
-      updatedAt: new Date().toISOString(),
-    };
-  });
-  await ext.storage.local.set({ [STORAGE_NOTES]: updated });
+  sessionHiddenNotes.add(noteId);
+  await saveSessionHiddenNotes();
+  await render().catch((err) => console.error(err));
+}
+
+async function showNoteOnSite(noteId) {
+  sessionHiddenNotes.delete(noteId);
+  await saveSessionHiddenNotes();
+  await render().catch((err) => console.error(err));
 }
 
 function startNoteDrag(event, noteId, card) {
@@ -1256,11 +1287,6 @@ function injectExtraStyles(style) {
       color: #111;
     }
   `;
-}
-
-async function hideNoteOnSite(noteId) {
-  sessionHiddenNotes.add(noteId);
-  await render().catch((err) => console.error(err));
 }
 
 function clamp(value, min, max) {
