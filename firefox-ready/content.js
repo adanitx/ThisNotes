@@ -25,8 +25,9 @@ const defaultStyle = {
   underline: false,
 };
 
-const currentUrl = normalizeComparableUrl(location.href);
-const siteKey = location.hostname.toLowerCase();
+let currentUrl = normalizeComparableUrl(location.href);
+let siteKey = location.hostname.toLowerCase();
+let lastCheckedUrl = currentUrl;
 
 let root = null;
 let dragState = null;
@@ -50,6 +51,29 @@ ext.storage.onChanged.addListener((changes, area) => {
 });
 
 render().catch((err) => console.error(err));
+
+// Detectar cambios de URL para SPAs (Single Page Applications)
+function updateCurrentUrlIfChanged() {
+  const newUrl = normalizeComparableUrl(location.href);
+  const newHost = location.hostname.toLowerCase();
+  
+  if (newUrl !== currentUrl || newHost !== siteKey) {
+    currentUrl = newUrl;
+    siteKey = newHost;
+    lastCheckedUrl = currentUrl;
+    sessionHiddenNotes.clear(); // Limpiar ocultos al cambiar de URL
+    render().catch((err) => console.error(err));
+  }
+}
+
+// Listener para cambios de hash
+window.addEventListener("hashchange", updateCurrentUrlIfChanged);
+
+// Listener para navegación (atrás/adelante)
+window.addEventListener("popstate", updateCurrentUrlIfChanged);
+
+// Polling periódico para detectar cambios de URL en SPAs complejas
+setInterval(updateCurrentUrlIfChanged, 500);
 
 async function render() {
   if (!siteKey || !currentUrl) {
