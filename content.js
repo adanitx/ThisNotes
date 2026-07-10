@@ -499,7 +499,7 @@ function onResizeMove(event) {
     return;
   }
   const minW = 220;
-  const minH = 120;
+  const minH = 160;
   const maxW = Math.max(minW, window.innerWidth - 12);
   const maxH = Math.max(minH, window.innerHeight - 12);
   const w = clamp(resizeState.startW + (event.clientX - resizeState.startX), minW, maxW);
