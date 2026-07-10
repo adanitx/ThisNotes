@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ThisNotes</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="header">
+      <div>
+        <h1>ThisNotes</h1>
+        <p id="siteLabel">Cargando web...</p>
+      </div>
+      <button id="openOptions" class="ghost" type="button">Configuracion</button>
+    </header>
+
+    <section class="panel" id="lockPanel" hidden>
+      <h2>Bloqueo activo</h2>
+      <p class="hint">Introduce el PIN para habilitar acciones sensibles.</p>
+      <div class="row">
+        <input id="unlockPin" type="password" placeholder="PIN" />
+        <button id="unlockBtn" type="button">Desbloquear</button>
+      </div>
+    </section>
+
+    <section class="panel" id="reloadPanel" hidden>
+      <p class="hint">Si no aparecen las notas, pulsa para recargar esta pestana y reactivar la extension.</p>
+      <button id="reloadTabBtn" type="button">Recargar pagina para recargar extension</button>
+    </section>
+
+    <section class="panel">
+      <h2 id="formTitle">Crear nota</h2>
+      <form id="noteForm">
+        <input type="hidden" id="noteId" />
+
+        <label>Titulo</label>
+        <input id="title" maxlength="120" placeholder="Ej: Credenciales sandbox" />
+
+        <label>Contenido</label>
+        <textarea id="content" rows="4" placeholder="Escribe aqui tu nota..."></textarea>
+
+        <label>Webs asociadas (URLs entre comillas y separadas por coma)</label>
+        <input id="websites" placeholder='"https://ejemplo.com/ruta", "https://app.ejemplo.com/recurso"' />
+
+        <label>Etiquetas (coma separadas)</label>
+        <input id="tags" placeholder="debug, cliente, urgente" />
+
+        <details>
+          <summary>Estilo de la nota</summary>
+          <div class="styleGrid">
+            <label>Color de nota</label>
+            <input id="noteColor" type="color" value="#fff2a8" />
+
+            <label>Color de texto</label>
+            <input id="textColor" type="color" value="#1d1d1d" />
+
+            <label>Fuente (desplegable)</label>
+            <select id="fontFamily"></select>
+
+            <label>Tamano fuente (px)</label>
+            <input id="fontSize" type="number" min="10" max="40" value="14" />
+
+            <label>Fondo del texto</label>
+            <input id="textBackgroundColor" type="color" value="#00000000" />
+
+            <label class="inline"><input id="italic" type="checkbox" /> Cursiva</label>
+            <label class="inline"><input id="underline" type="checkbox" /> Subrayado</label>
+          </div>
+        </details>
+
+        <details>
+          <summary>Adjuntos (imagenes / capturas)</summary>
+          <div class="styleGrid">
+            <p class="hint">Max 800 KB por imagen. No se copian al portapapeles.</p>
+            <input id="attachInput" type="file" accept="image/*" multiple />
+            <div id="attachPreview" class="attachPreview"></div>
+          </div>
+        </details>
+
+        <label class="inline" style="margin-top:8px">
+          <input id="showOnAccess" type="checkbox" />
+          Visualizar al acceder (muestra la nota siempre que entres en esta web, aunque la hayas ocultado)
+        </label>
+
+        <details id="pinNewSection">
+          <summary>PIN de visualizacion</summary>
+          <div class="styleGrid">
+            <p class="hint">Si estableces un PIN, la nota mostrara un bloqueo en la web hasta que se introduzca. Deja en blanco para quitar el PIN.</p>
+            <label>PIN de visualizacion (opcional, 4-20 caracteres)</label>
+            <input id="viewPin" type="password" placeholder="PIN para ver la nota" autocomplete="off" />
+            <label>Confirmar PIN</label>
+            <input id="viewPinConfirm" type="password" placeholder="Repite el PIN" autocomplete="off" />
+          </div>
+        </details>
+
+        <details id="pinExistingSection" hidden>
+          <summary>PIN de visualizacion (activo)</summary>
+          <div class="styleGrid">
+            <p class="hint">Esta nota ya tiene un PIN de visualizacion. Introduce el PIN actual para eliminarlo.</p>
+            <label>PIN actual</label>
+            <input id="removePinCurrent" type="password" placeholder="PIN actual" autocomplete="off" />
+            <button id="removePinBtn" type="button" class="ghost">Borrar PIN existente</button>
+          </div>
+        </details>
+
+        <div class="row">
+          <button type="submit" id="saveBtn">Guardar</button>
+          <button type="button" id="resetBtn" class="ghost">Limpiar</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <div class="row between">
+        <h2>Notas de esta web</h2>
+        <div class="row compact">
+          <button id="exportSiteBtn" class="ghost" type="button">Exportar web</button>
+          <button id="importBtn" class="ghost" type="button">Importar</button>
+          <input id="importFile" type="file" accept="application/json" hidden />
+        </div>
+      </div>
+      <div id="notesList" class="notesList"></div>
+    </section>
+
+    <template id="noteItemTemplate">
+      <article class="noteItem">
+        <div class="noteHead">
+          <h3 class="noteTitle"></h3>
+          <div class="row compact">
+            <button class="iconBtn toggleVisibility" type="button" title="Mostrar/Ocultar"></button>
+            <button class="iconBtn copyNote" type="button" title="Copiar"></button>
+            <button class="iconBtn exportNote" type="button" title="Exportar"></button>
+            <button class="iconBtn editNote" type="button" title="Editar"></button>
+            <button class="iconBtn deleteNote" type="button" title="Eliminar"></button>
+          </div>
+        </div>
+        <p class="noteMeta"></p>
+        <p class="noteTags"></p>
+        <p class="noteSnippet"></p>
+        <p class="noteShowOnAccess"></p>
+      </article>
+    </template>
+
+    <div id="deleteModal" class="modal-overlay" hidden>
+      <div class="modal-box">
+        <h3>Eliminar nota</h3>
+        <p id="deleteModalMsg"></p>
+        <label class="inline" style="margin-top:10px">
+          <input type="checkbox" id="skipConfirmCheck" />
+          No volver a pedir confirmacion en esta sesion
+        </label>
+        <div class="row" style="margin-top:12px; justify-content:flex-end">
+          <button id="deleteModalCancel" class="ghost" type="button">Cancelar</button>
+          <button id="deleteModalConfirm" type="button">Eliminar</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
