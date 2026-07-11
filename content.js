@@ -64,9 +64,11 @@ ext.storage.onChanged.addListener((changes, area) => {
   }
 });
 
-// Initialize: Load session hidden notes and render
+// Initialize: on fresh page load, reset per-URL session hidden state
+// so notes with "showOnAccess" always appear after F5/direct open.
 (async () => {
-  await loadSessionHiddenNotes();
+  sessionHiddenNotes.clear();
+  await saveSessionHiddenNotes();
   await render().catch((err) => console.error(err));
 })();
 
